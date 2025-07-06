@@ -2,7 +2,12 @@
 A repo that contains a working model cdc model of  postgres, kafka cdc and a python consumer
 
 
-## Commands to execute if execute manually
+## Commands to execute 
+* Install podman or docker 
+* cd cdc-demo
+* podman-compose up -d --build
+
+## if execute manually
 * Install podman or docker 
 * cd cdc-demo
 * podman-compose up -d --build
