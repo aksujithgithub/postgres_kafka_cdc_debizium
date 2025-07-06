@@ -1,46 +1,49 @@
 from confluent_kafka import Consumer, KafkaException, KafkaError
 import json
-import sys
 import time
 
 def create_consumer():
     conf = {
-        'bootstrap.servers': 'kafka:9092',  # Using service name from compose file
+        'bootstrap.servers': 'kafka:9092',
         'group.id': 'python-consumer-group',
         'auto.offset.reset': 'earliest',
         'enable.auto.commit': False,
-        'socket.keepalive.enable': True,
-        'reconnect.backoff.ms': 1000,
-        'reconnect.backoff.max.ms': 10000
+        'topic.metadata.refresh.interval.ms': '30000'  # Check for topic every 30s
     }
+    return Consumer(conf)
 
-    consumer = Consumer(conf)
-    return consumer
+def wait_for_topic(consumer, topic, timeout=120):
+    """Wait for topic to become available"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        metadata = consumer.list_topics(timeout=10)
+        if metadata.topics.get(topic) is not None:
+            print(f"Topic '{topic}' is available")
+            return True
+        print(f"Waiting for topic '{topic}'...")
+        time.sleep(5)
+    raise KafkaException(KafkaError(KafkaError._TIMED_OUT, 
+                  f"Topic '{topic}' not available after {timeout} seconds"))
 
-def wait_for_kafka():
-    """Wait for Kafka to become available"""
-    max_retries = 10
-    retry_count = 0
-    consumer = None
-    
-    while retry_count < max_retries:
-        try:
-            consumer = create_consumer()
-            # Test connection by getting metadata
-            consumer.list_topics(timeout=10)
-            return consumer
-        except Exception as e:
-            retry_count += 1
-            print(f"Attempt {retry_count}/{max_retries}: Kafka not available yet - {str(e)}")
-            time.sleep(5)
-    
-    raise Exception("Failed to connect to Kafka after multiple attempts")
-
-def consume_messages(consumer, topics):
+def process_message(msg):
+    """Process incoming Kafka message"""
     try:
-        consumer.subscribe(topics)
-        print(f"Subscribed to topics: {topics}")
+        data = json.loads(msg.value())
+        print(f"Received message: {data}")
+    except json.JSONDecodeError:
+        print(f"Received raw message: {msg.value()}")
 
+def main():
+    print("Starting Kafka Consumer...")
+    consumer = create_consumer()
+    topic = "dbserver1.public.customers"
+
+    try:
+        # Wait for topic to exist before subscribing
+        wait_for_topic(consumer, topic)
+        
+        consumer.subscribe([topic])
+        
         while True:
             msg = consumer.poll(1.0)
             if msg is None:
@@ -48,29 +51,21 @@ def consume_messages(consumer, topics):
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:
                     continue
-                elif msg.error():
+                elif msg.error().code() == KafkaError.UNKNOWN_TOPIC_OR_PARTITION:
+                    print("Topic lost, attempting to resubscribe...")
+                    wait_for_topic(consumer, topic)
+                    consumer.subscribe([topic])
+                    continue
+                else:
                     raise KafkaException(msg.error())
-            else:
-                try:
-                    message = json.loads(msg.value())
-                    # Process message as before
-                    print(f"Received message: {message}")
-                    
-                except json.JSONDecodeError:
-                    print(f"Raw message: {msg.value()}")
-
+            process_message(msg)
+            
     except KeyboardInterrupt:
-        print('%% Aborted by user\n')
+        print("Consumer interrupted")
     finally:
         consumer.close()
 
-if __name__ == '__main__':
-    print('Python Consumer is sleeping for 120 seconds...')
+if __name__ == "__main__":
+    print("Sleeping consumer for 120 secs")
     time.sleep(120)
-    print('Starting Python Consumer...')
-    try:
-        consumer = wait_for_kafka()
-        consume_messages(consumer, ['dbserver1.public.customers'])
-    except Exception as e:
-        print(f"Fatal error: {str(e)}")
-        sys.exit(1)
+    main()

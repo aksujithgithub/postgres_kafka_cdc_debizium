@@ -8,9 +8,4 @@ CREATE TABLE IF NOT EXISTS public.customers (
 INSERT INTO public.customers (first_name, last_name, email)
 VALUES ('ask', 'ak', 'sak@example.com');
 
-UPDATE public.customers
-SET email = 'sak1@example.com'
-WHERE first_name = 'ask' AND last_name = 'ak';
 
-DELETE FROM public.customers
-WHERE first_name = 'ask' AND last_name = 'ak';
